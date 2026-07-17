@@ -255,22 +255,30 @@ const RPCS = [
 
 // ============ rpc plumbing ============
 let rpcIndex = 0;
+let lastRpcError = null;
 async function rpc(method, params, tries = RPCS.length * 2) {
   for (let i = 0; i < tries; i++) {
     const url = RPCS[rpcIndex % RPCS.length];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error("http " + res.status);
+      clearTimeout(timeout);
+      if (!res.ok) throw new Error(url.replace(/^https?:\/\//, "") + " → http " + res.status);
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message || "rpc error");
+      if (data.error) throw new Error(url.replace(/^https?:\/\//, "") + " → " + (data.error.message || "rpc error"));
       return data.result;
     } catch (e) {
+      clearTimeout(timeout);
+      const msg = e.name === "AbortError" ? url.replace(/^https?:\/\//, "") + " → timed out" : (e.message || String(e));
+      lastRpcError = msg;
       rpcIndex++;
-      if (i === tries - 1) throw e;
+      if (i === tries - 1) throw new Error(msg);
     }
   }
 }
@@ -387,10 +395,17 @@ function drawStrip(events) {
 }
 
 // ============ log scanning with adaptive chunks ============
+// Public RPCs cap eth_getLogs block ranges (often 2k-10k blocks), and the cap
+// varies per provider and isn't announced up front — so we start conservative,
+// grow on success, shrink hard on failure, and give up loudly after enough
+// consecutive failures rather than spinning at 0% forever.
 async function scanLogs(latestBlock, onProgress) {
   const logs = [];
   let from = DEPLOY_BLOCK;
-  let chunk = 400000;
+  let chunk = 5000;
+  let consecutiveFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 12;
+
   while (from <= latestBlock) {
     const to = Math.min(from + chunk - 1, latestBlock);
     try {
@@ -402,11 +417,17 @@ async function scanLogs(latestBlock, onProgress) {
       }], 1);
       logs.push(...batch);
       from = to + 1;
-      chunk = Math.min(chunk * 2, 400000); // recover after shrinks
+      consecutiveFailures = 0;
+      chunk = Math.min(Math.round(chunk * 1.5), 10000); // grow gently, cap at a safe ceiling
       onProgress((from - DEPLOY_BLOCK) / (latestBlock - DEPLOY_BLOCK), logs.length);
     } catch (e) {
-      if (chunk <= 5000) { rpcIndex++; await new Promise(r => setTimeout(r, 600)); }
-      else chunk = Math.floor(chunk / 4);
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        throw new Error("every RPC rejected the log scan after repeated retries (last: " + (e.message || "unknown") + ")");
+      }
+      rpcIndex++; // rotate provider on every failure, not just after shrinking
+      chunk = Math.max(500, Math.floor(chunk / 2));
+      await new Promise(r => setTimeout(r, 300));
     }
   }
   return logs;

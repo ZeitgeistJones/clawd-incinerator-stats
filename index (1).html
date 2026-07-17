@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAWD Incinerator — Furnace Log</title>
+<meta name="description" content="Live burn history for the CLAWD Incinerator on Base. Every burn, every wallet, every cold spell — read straight from the chain.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --char:#0F0C09;
+    --soot:#1B1611;
+    --soot-edge:#2A231B;
+    --ash:#E9E1D3;
+    --ember:#FF5A1F;
+    --flame:#FFB347;
+    --cold:#6E655A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--char)}
+  body{
+    font-family:'IBM Plex Mono',monospace;
+    background:var(--char);
+    color:var(--ash);
+    min-height:100vh;
+    padding:0 clamp(16px,4vw,56px) 80px;
+  }
+  a{color:var(--flame);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--flame);outline-offset:2px}
+
+  header{
+    display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
+    gap:16px;padding:40px 0 28px;border-bottom:1px solid var(--soot-edge);
+  }
+  .eyebrow{
+    font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--cold);
+    margin-bottom:10px;
+  }
+  h1{
+    font-family:'Anton',sans-serif;font-weight:400;
+    font-size:clamp(40px,7vw,84px);line-height:.95;letter-spacing:.01em;
+    text-transform:uppercase;color:var(--ash);
+  }
+  h1 .lit{color:var(--ember)}
+
+  .status{
+    text-align:right;font-size:13px;color:var(--cold);min-width:200px;
+  }
+  .status .state{
+    font-family:'Anton',sans-serif;font-size:clamp(22px,3vw,34px);
+    text-transform:uppercase;letter-spacing:.03em;color:var(--cold);
+    display:block;margin-bottom:4px;
+  }
+  .status.ready .state{color:var(--ember)}
+  @media (prefers-reduced-motion:no-preference){
+    .status.ready .state{animation:pulse 2.2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+  }
+  @media (max-width:640px){ .status{text-align:left} }
+
+  /* ---- heat strip ---- */
+  #strip-wrap{padding:36px 0 8px}
+  #strip{width:100%;height:110px;display:block}
+  .strip-axis{
+    display:flex;justify-content:space-between;font-size:11px;color:var(--cold);
+    letter-spacing:.08em;text-transform:uppercase;padding-top:8px;
+  }
+
+  /* ---- loading ---- */
+  #loader{padding:60px 0;text-align:center}
+  #loader .eyebrow{margin-bottom:18px}
+  .stoke-bar{
+    width:min(480px,100%);height:6px;margin:0 auto 14px;background:var(--soot);
+    border:1px solid var(--soot-edge);position:relative;overflow:hidden;
+  }
+  .stoke-bar > div{
+    position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--ember),var(--flame));
+    transition:width .3s ease;
+  }
+  #loader .detail{font-size:12px;color:var(--cold)}
+  #error{display:none;padding:60px 0;text-align:center;color:var(--ash)}
+  #error p{margin-bottom:20px;font-size:14px;color:var(--cold)}
+  #error button{
+    font-family:inherit;font-size:13px;letter-spacing:.1em;text-transform:uppercase;
+    background:none;border:1px solid var(--ember);color:var(--ember);
+    padding:12px 28px;cursor:pointer;
+  }
+  #error button:hover{background:var(--ember);color:var(--char)}
+
+  /* ---- stat tiles ---- */
+  .tiles{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--soot-edge);border:1px solid var(--soot-edge);margin-top:28px;
+  }
+  @media (max-width:760px){ .tiles{grid-template-columns:repeat(2,1fr)} }
+  .tile{background:var(--soot);padding:22px 20px 18px}
+  .tile .label{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--cold);margin-bottom:12px}
+  .tile .value{
+    font-family:'Anton',sans-serif;font-size:clamp(30px,4.5vw,52px);
+    line-height:1;color:var(--ash);
+  }
+  .tile .value.hot{color:var(--ember)}
+  .tile .sub{font-size:11px;color:var(--cold);margin-top:8px}
+
+  /* ---- sections ---- */
+  section{margin-top:56px}
+  h2{
+    font-family:'Anton',sans-serif;font-weight:400;font-size:clamp(20px,2.6vw,28px);
+    text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;
+  }
+  .section-note{font-size:12px;color:var(--cold);margin-bottom:20px}
+
+  .pause-list{border-top:1px solid var(--soot-edge)}
+  .pause-row{
+    display:flex;flex-wrap:wrap;gap:8px 24px;align-items:baseline;
+    padding:14px 0;border-bottom:1px solid var(--soot-edge);font-size:13px;
+  }
+  .pause-row .dur{
+    font-family:'Anton',sans-serif;font-size:22px;color:var(--cold);min-width:110px;
+  }
+  .pause-row .range{color:var(--ash)}
+  .pause-none{padding:18px 0;font-size:13px;color:var(--cold)}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{
+    text-align:left;font-weight:500;font-size:11px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--cold);padding:10px 14px 10px 0;
+    border-bottom:1px solid var(--soot-edge);
+  }
+  td{padding:11px 14px 11px 0;border-bottom:1px solid var(--soot-edge);vertical-align:baseline;white-space:nowrap}
+  td.num,th.num{text-align:right;padding-right:0}
+  .snipe{color:var(--ember)}
+  .slow{color:var(--flame)}
+  .pause-flag{color:var(--cold);font-size:11px;letter-spacing:.12em}
+  .table-scroll{overflow-x:auto}
+  .bar{
+    display:inline-block;height:8px;background:var(--ember);vertical-align:middle;
+    margin-right:10px;min-width:2px;
+  }
+  #show-all{
+    margin-top:18px;font-family:inherit;font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;background:none;border:1px solid var(--soot-edge);
+    color:var(--cold);padding:10px 22px;cursor:pointer;
+  }
+  #show-all:hover{border-color:var(--cold);color:var(--ash)}
+
+  footer{
+    margin-top:72px;padding-top:24px;border-top:1px solid var(--soot-edge);
+    display:flex;flex-wrap:wrap;gap:8px 32px;font-size:12px;color:var(--cold);
+  }
+  #main{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">clawd incinerator &middot; base mainnet</div>
+    <h1>Furnace <span class="lit">Log</span></h1>
+  </div>
+  <div class="status" id="status">
+    <span class="state" id="status-state">Reading&hellip;</span>
+    <span id="status-detail"></span>
+  </div>
+</header>
+
+<div id="loader">
+  <div class="eyebrow">stoking &middot; reading every burn from the chain</div>
+  <div class="stoke-bar"><div id="stoke-fill"></div></div>
+  <div class="detail" id="loader-detail">connecting to Base&hellip;</div>
+</div>
+
+<div id="error">
+  <p id="error-msg">Couldn't reach a Base RPC endpoint.</p>
+  <button onclick="boot()">Retry scan</button>
+</div>
+
+<div id="main">
+
+  <div id="strip-wrap">
+    <canvas id="strip"></canvas>
+    <div class="strip-axis"><span id="axis-left"></span><span>every tick is a burn &middot; dark stretches are cold spells</span><span id="axis-right"></span></div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">Burns</div><div class="value" id="t-burns">—</div><div class="sub" id="t-burns-sub"></div></div>
+    <div class="tile"><div class="label">Unique wallets</div><div class="value hot" id="t-wallets">—</div><div class="sub" id="t-wallets-sub"></div></div>
+    <div class="tile"><div class="label">CLAWD burned</div><div class="value" id="t-burned">—</div><div class="sub" id="t-burned-sub"></div></div>
+    <div class="tile"><div class="label">Median snipe</div><div class="value" id="t-snipe">—</div><div class="sub">past cooldown expiry, cold spells excluded</div></div>
+  </div>
+
+  <section>
+    <h2>Cold spells</h2>
+    <div class="section-note">Stretches over 24h with no burn — the furnace either paused or ran out of fuel.</div>
+    <div class="pause-list" id="pauses"></div>
+  </section>
+
+  <section>
+    <h2>Stokers</h2>
+    <div class="section-note">Every wallet that has ever called incinerate(), by burn count.</div>
+    <div class="table-scroll">
+      <table id="leaderboard">
+        <thead><tr><th>Wallet</th><th class="num">Burns</th><th class="num">Share</th><th class="num">CLAWD burned</th><th class="num">First seen</th><th class="num">Last seen</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Burn log</h2>
+    <div class="section-note">Latest first. Snipe = time between the cooldown expiring and the burn landing.</div>
+    <div class="table-scroll">
+      <table id="log">
+        <thead><tr><th>When (UTC)</th><th>Wallet</th><th class="num">Snipe</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button id="show-all" style="display:none">Show all burns</button>
+  </section>
+
+</div>
+
+<footer>
+  <span>contract <a href="https://basescan.org/address/0x536453350F2EeE2EB8bFeE1866bAF4fCa494A092" target="_blank" rel="noopener">0x5364&hellip;A092</a></span>
+  <span id="foot-refreshed"></span>
+  <span>read live from Base public RPC &middot; nothing cached, nothing tracked</span>
+</footer>
+
+<script>
+"use strict";
+
+// ============ constants ============
+const CONTRACT = "0x536453350F2EeE2EB8bFeE1866bAF4fCa494A092";
+const DEPLOY_BLOCK = 42039453;
+const DEPLOY_TS = Date.UTC(2026, 1, 12, 3, 50, 53) / 1000;
+const TOPIC_INCINERATED = "0x4031bacf83d7fecf501f3155733de67666127c4b8539af98c2a1ddda6e4595f3";
+const COOLDOWN = 28800;
+const PAUSE_THRESHOLD = COOLDOWN * 3;
+const SEL = {
+  lastIncinerateTime: "0xa7364a1e",
+  cooldownSeconds:   "0xb8221bc4",
+  clawdBalance:      "0xd621bda0",
+  canIncinerate:     "0x9e3910e7",
+  burnAmount:        "0x486a7e6b",
+};
+const RPCS = [
+  "https://mainnet.base.org",
+  "https://base-rpc.publicnode.com",
+  "https://base.llamarpc.com",
+  "https://1rpc.io/base",
+];
+
+// ============ rpc plumbing ============
+let rpcIndex = 0;
+async function rpc(method, params, tries = RPCS.length * 2) {
+  for (let i = 0; i < tries; i++) {
+    const url = RPCS[rpcIndex % RPCS.length];
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      if (!res.ok) throw new Error("http " + res.status);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || "rpc error");
+      return data.result;
+    } catch (e) {
+      rpcIndex++;
+      if (i === tries - 1) throw e;
+    }
+  }
+}
+
+async function ethCall(selector) {
+  return rpc("eth_call", [{ to: CONTRACT, data: selector }, "latest"]);
+}
+
+// ============ analysis (tested standalone before embedding) ============
+function decodeIncinerated(log) {
+  if (!log.topics || log.topics.length < 2) return null;
+  const caller = "0x" + log.topics[1].slice(26);
+  const d = log.data.slice(2);
+  if (d.length < 192) return null;
+  return {
+    caller: caller.toLowerCase(),
+    amountBurned: BigInt("0x" + d.slice(0, 64)),
+    rewardPaid: BigInt("0x" + d.slice(64, 128)),
+    timestamp: Number(BigInt("0x" + d.slice(128, 192))),
+    block: parseInt(log.blockNumber, 16),
+    tx: log.transactionHash,
+  };
+}
+
+function analyze(events) {
+  const evs = [...events].sort((a, b) => a.timestamp - b.timestamp);
+  const byCaller = new Map();
+  const gaps = [];
+  const pauses = [];
+  let totalBurned = 0n;
+
+  for (let i = 0; i < evs.length; i++) {
+    const e = evs[i];
+    totalBurned += e.amountBurned;
+    const c = byCaller.get(e.caller) || { count: 0, burned: 0n, first: e.timestamp, last: e.timestamp };
+    c.count++; c.burned += e.amountBurned; c.last = e.timestamp;
+    byCaller.set(e.caller, c);
+    if (i > 0) {
+      const gap = e.timestamp - evs[i - 1].timestamp;
+      e.gap = gap;
+      e.latency = gap - COOLDOWN;
+      gaps.push({ gap, latency: e.latency });
+      if (gap > PAUSE_THRESHOLD) pauses.push({ from: evs[i - 1].timestamp, to: e.timestamp, seconds: gap });
+    }
+  }
+
+  const race = gaps.filter(g => g.gap <= PAUSE_THRESHOLD).map(g => g.latency).sort((a, b) => a - b);
+  const latency = {
+    median: race.length ? race[Math.floor(race.length / 2)] : null,
+    max: race.length ? race[race.length - 1] : null,
+    under60: race.filter(l => l <= 60).length,
+    samples: race.length,
+  };
+
+  const leaderboard = [...byCaller.entries()].map(([addr, c]) => ({ addr, ...c })).sort((a, b) => b.count - a.count);
+
+  return { events: evs, totalBurns: evs.length, totalBurned, uniqueWallets: byCaller.size, leaderboard, pauses, latency };
+}
+
+// ============ formatting ============
+function fmtDuration(s) {
+  if (s == null) return "—";
+  const neg = s < 0; s = Math.abs(Math.round(s));
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const out = d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+  return (neg ? "-" : "") + out;
+}
+function fmtClawd(wei) { return Number(wei / (10n ** 18n)).toLocaleString("en-US"); }
+function fmtClawdShort(wei) {
+  const n = Number(wei / (10n ** 18n));
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(0) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
+  return String(n);
+}
+function fmtDate(ts) {
+  return new Date(ts * 1000).toISOString().replace("T", " ").slice(0, 16);
+}
+function fmtDay(ts) {
+  return new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+function shortAddr(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
+
+// ============ heat strip ============
+function drawStrip(events) {
+  const canvas = document.getElementById("strip");
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = 110;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const t0 = Math.min(DEPLOY_TS, events.length ? events[0].timestamp : DEPLOY_TS);
+  const t1 = Date.now() / 1000;
+  const span = t1 - t0;
+  const x = ts => ((ts - t0) / span) * w;
+
+  // baseline: the cold bed of the furnace
+  ctx.fillStyle = "#1B1611";
+  ctx.fillRect(0, h / 2 - 14, w, 28);
+
+  // burns as ember ticks; hotter (taller, brighter) when latency is a snipe
+  for (const e of events) {
+    const px = x(e.timestamp);
+    const snipe = e.latency != null && e.latency <= 60;
+    ctx.fillStyle = snipe ? "#FF5A1F" : "#FFB347";
+    const tickH = snipe ? 44 : 34;
+    ctx.fillRect(px - 0.75, h / 2 - tickH / 2, 1.5, tickH);
+  }
+
+  document.getElementById("axis-left").textContent = fmtDay(t0) + " · deploy";
+  document.getElementById("axis-right").textContent = "now · " + fmtDay(t1);
+}
+
+// ============ log scanning with adaptive chunks ============
+async function scanLogs(latestBlock, onProgress) {
+  const logs = [];
+  let from = DEPLOY_BLOCK;
+  let chunk = 400000;
+  while (from <= latestBlock) {
+    const to = Math.min(from + chunk - 1, latestBlock);
+    try {
+      const batch = await rpc("eth_getLogs", [{
+        address: CONTRACT,
+        topics: [TOPIC_INCINERATED],
+        fromBlock: "0x" + from.toString(16),
+        toBlock: "0x" + to.toString(16),
+      }], 1);
+      logs.push(...batch);
+      from = to + 1;
+      chunk = Math.min(chunk * 2, 400000); // recover after shrinks
+      onProgress((from - DEPLOY_BLOCK) / (latestBlock - DEPLOY_BLOCK), logs.length);
+    } catch (e) {
+      if (chunk <= 5000) { rpcIndex++; await new Promise(r => setTimeout(r, 600)); }
+      else chunk = Math.floor(chunk / 4);
+    }
+  }
+  return logs;
+}
+
+// ============ live status ============
+let countdownTimer = null;
+async function updateStatus() {
+  try {
+    const [lastHex, cdHex, balHex, burnAmtHex] = await Promise.all([
+      ethCall(SEL.lastIncinerateTime), ethCall(SEL.cooldownSeconds),
+      ethCall(SEL.clawdBalance), ethCall(SEL.burnAmount),
+    ]);
+    const last = Number(BigInt(lastHex));
+    const cd = Number(BigInt(cdHex));
+    const bal = BigInt(balHex);
+    const burnAmt = BigInt(burnAmtHex);
+    const el = document.getElementById("status");
+    const state = document.getElementById("status-state");
+    const detail = document.getElementById("status-detail");
+
+    if (countdownTimer) clearInterval(countdownTimer);
+    const fuelOut = bal < burnAmt;
+
+    const tick = () => {
+      const now = Date.now() / 1000;
+      const nextAt = last + cd;
+      if (fuelOut) {
+        el.classList.remove("ready");
+        state.textContent = "Out of fuel";
+        detail.textContent = fmtClawdShort(bal) + " CLAWD left — below burn size";
+      } else if (now >= nextAt) {
+        el.classList.add("ready");
+        state.textContent = "Ready to burn";
+        detail.textContent = "window open " + fmtDuration(now - nextAt) + " — first caller wins";
+      } else {
+        el.classList.remove("ready");
+        state.textContent = fmtDuration(nextAt - now);
+        detail.textContent = "until next burn window · " + fmtClawdShort(bal) + " CLAWD in the hopper";
+      }
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  } catch (e) { /* status is a bonus; the log still stands on its own */ }
+}
+
+// ============ render ============
+function render(r) {
+  document.getElementById("loader").style.display = "none";
+  document.getElementById("main").style.display = "block";
+
+  drawStrip(r.events);
+  window.addEventListener("resize", () => drawStrip(r.events));
+
+  const daysSpan = r.events.length > 1
+    ? (r.events[r.events.length - 1].timestamp - r.events[0].timestamp) / 86400 : 0;
+
+  document.getElementById("t-burns").textContent = r.totalBurns;
+  document.getElementById("t-burns-sub").textContent =
+    r.events.length ? "first " + fmtDay(r.events[0].timestamp) + " · " + (daysSpan ? (r.totalBurns / daysSpan).toFixed(1) + "/day avg" : "") : "";
+  document.getElementById("t-wallets").textContent = r.uniqueWallets;
+  const top = r.leaderboard[0];
+  document.getElementById("t-wallets-sub").textContent =
+    top ? shortAddr(top.addr) + " holds " + Math.round(top.count / r.totalBurns * 100) + "% of all burns" : "";
+  document.getElementById("t-burned").textContent = fmtClawdShort(r.totalBurned);
+  document.getElementById("t-burned-sub").textContent = fmtClawd(r.totalBurned) + " CLAWD to the dead address";
+  document.getElementById("t-snipe").textContent = fmtDuration(r.latency.median);
+
+  // cold spells
+  const pl = document.getElementById("pauses");
+  if (!r.pauses.length) {
+    pl.innerHTML = '<div class="pause-none">None. The furnace has never gone cold for more than a day.</div>';
+  } else {
+    pl.innerHTML = r.pauses.map(p =>
+      `<div class="pause-row"><span class="dur">${fmtDuration(p.seconds)}</span>` +
+      `<span class="range">${fmtDate(p.from)} &rarr; ${fmtDate(p.to)}</span></div>`
+    ).join("");
+  }
+
+  // leaderboard
+  const maxCount = r.leaderboard[0] ? r.leaderboard[0].count : 1;
+  document.querySelector("#leaderboard tbody").innerHTML = r.leaderboard.map(l =>
+    `<tr><td><a href="https://basescan.org/address/${l.addr}" target="_blank" rel="noopener">${shortAddr(l.addr)}</a></td>` +
+    `<td class="num"><span class="bar" style="width:${Math.max(2, l.count / maxCount * 90)}px"></span>${l.count}</td>` +
+    `<td class="num">${Math.round(l.count / r.totalBurns * 100)}%</td>` +
+    `<td class="num">${fmtClawd(l.burned)}</td>` +
+    `<td class="num">${fmtDay(l.first)}</td><td class="num">${fmtDay(l.last)}</td></tr>`
+  ).join("");
+
+  // burn log
+  const rows = [...r.events].reverse();
+  const renderRows = (n) => {
+    document.querySelector("#log tbody").innerHTML = rows.slice(0, n).map(e => {
+      let snipeCell = "—";
+      if (e.latency != null) {
+        if (e.gap > PAUSE_THRESHOLD) snipeCell = '<span class="pause-flag">after cold spell</span>';
+        else snipeCell = `<span class="${e.latency <= 60 ? "snipe" : "slow"}">${fmtDuration(e.latency)}</span>`;
+      }
+      return `<tr><td>${fmtDate(e.timestamp)}</td>` +
+        `<td><a href="https://basescan.org/address/${e.caller}" target="_blank" rel="noopener">${shortAddr(e.caller)}</a></td>` +
+        `<td class="num">${snipeCell}</td>` +
+        `<td class="num"><a href="https://basescan.org/tx/${e.tx}" target="_blank" rel="noopener">tx&nbsp;&rarr;</a></td></tr>`;
+    }).join("");
+  };
+  renderRows(25);
+  const btn = document.getElementById("show-all");
+  if (rows.length > 25) {
+    btn.style.display = "inline-block";
+    btn.onclick = () => { renderRows(rows.length); btn.style.display = "none"; };
+  }
+
+  document.getElementById("foot-refreshed").textContent =
+    "scanned " + new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
+}
+
+// ============ boot ============
+function mockEvents() { // #demo hook so the page can be previewed without RPC
+  const evs = []; let t = DEPLOY_TS + 3600;
+  const bot = "0x865a80b13f3c9e235e2f3ac107d86572f51393d2";
+  const others = ["0x1111111111111111111111111111111111111111","0x2222222222222222222222222222222222222222"];
+  for (let i = 0; i < 60; i++) { evs.push({ caller: bot, amountBurned: 10000000n*10n**18n, rewardPaid: 10000n*10n**18n, timestamp: t, block: 0, tx: "0x" + "ab".repeat(32) }); t += COOLDOWN + (i%7===0?900:3); }
+  evs.push({ caller: others[0], amountBurned: 10000000n*10n**18n, rewardPaid: 10000n*10n**18n, timestamp: t + 2600, block: 0, tx: "0x"+"cd".repeat(32) }); t += COOLDOWN + 2600;
+  t += 6 * 86400; // cold spell
+  for (let i = 0; i < 40; i++) { evs.push({ caller: i%9===0?others[1]:bot, amountBurned: 10000000n*10n**18n, rewardPaid: 10000n*10n**18n, timestamp: t, block: 0, tx: "0x"+"ef".repeat(32) }); t += COOLDOWN + 5; }
+  const r = analyze(evs);
+  return r;
+}
+
+async function boot() {
+  document.getElementById("error").style.display = "none";
+  document.getElementById("loader").style.display = "block";
+  const fill = document.getElementById("stoke-fill");
+  const detail = document.getElementById("loader-detail");
+
+  if (location.hash === "#demo") { render(mockEvents()); updateStatus(); return; }
+
+  try {
+    const latest = parseInt(await rpc("eth_blockNumber", []), 16);
+    detail.textContent = "scanning " + (latest - DEPLOY_BLOCK).toLocaleString() + " blocks since deploy…";
+    const logs = await scanLogs(latest, (p, found) => {
+      fill.style.width = Math.round(p * 100) + "%";
+      detail.textContent = Math.round(p * 100) + "% scanned · " + found + " burns found";
+    });
+    const events = logs.map(decodeIncinerated).filter(Boolean);
+    render(analyze(events));
+    updateStatus();
+    setInterval(updateStatus, 60000);
+  } catch (e) {
+    document.getElementById("loader").style.display = "none";
+    document.getElementById("error").style.display = "block";
+    document.getElementById("error-msg").textContent =
+      "Couldn't finish the chain scan (" + (e.message || "network error") + "). Hotel wifi, ironically, may be the culprit.";
+  }
+}
+boot();
+</script>
+</body>
+</html>

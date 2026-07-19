@@ -28,10 +28,14 @@ export default async function handler(req, res) {
       const gotLock = await redis.set(LOCK_KEY, "1", { nx: true, ex: LOCK_TTL_SECONDS });
       if (gotLock) {
         try {
+          // scanRange throws if any chunk hard-fails after retries — do NOT
+          // advance scannedTo past unreadable ranges (that permanently drops burns).
           const newEvents = await scanRange(scannedTo + 1, latest);
           events = events.concat(newEvents);
           scannedTo = latest;
-          await redis.set(CACHE_KEY, { events, scannedTo }, { ex: 60 * 60 * 24 * 30 }); // 30-day safety TTL
+          await redis.set(CACHE_KEY, { events, scannedTo, cachedAt: Date.now() }, { ex: 60 * 60 * 24 * 30 });
+        } catch (scanErr) {
+          console.warn("incremental scan failed; serving cache without advancing scannedTo:", scanErr.message || scanErr);
         } finally {
           await redis.del(LOCK_KEY);
         }

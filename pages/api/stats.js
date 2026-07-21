@@ -13,7 +13,9 @@ import { CONTRACT, DEPLOY_BLOCK, rpc, scanRange, analyze } from "../../lib/incin
 const redis = Redis.fromEnv();
 const CACHE_KEY = "incinerator:events:v1";
 const LOCK_KEY = "incinerator:scanlock:v1";
-const LOCK_TTL_SECONDS = 30; // guards against two requests racing to scan at once
+const LOCK_TTL_SECONDS = 90; // tip catch-up can exceed 30s on public RPCs
+// Cap work per request so serverless doesn't time out while still making progress.
+const MAX_BLOCKS_PER_REQUEST = 80000;
 
 export default async function handler(req, res) {
   try {
@@ -28,11 +30,13 @@ export default async function handler(req, res) {
       const gotLock = await redis.set(LOCK_KEY, "1", { nx: true, ex: LOCK_TTL_SECONDS });
       if (gotLock) {
         try {
-          // scanRange throws if any chunk hard-fails after retries — do NOT
-          // advance scannedTo past unreadable ranges (that permanently drops burns).
-          const newEvents = await scanRange(scannedTo + 1, latest);
-          events = events.concat(newEvents);
-          scannedTo = latest;
+          const target = Math.min(latest, scannedTo + MAX_BLOCKS_PER_REQUEST);
+          // scanRange throws if a window hard-fails — do NOT advance scannedTo past it.
+          const newEvents = await scanRange(scannedTo + 1, target);
+          const byTx = new Map(events.map((e) => [String(e.tx).toLowerCase(), e]));
+          for (const e of newEvents) byTx.set(String(e.tx).toLowerCase(), e);
+          events = [...byTx.values()].sort((a, b) => a.timestamp - b.timestamp || a.block - b.block);
+          scannedTo = target;
           await redis.set(CACHE_KEY, { events, scannedTo, cachedAt: Date.now() }, { ex: 60 * 60 * 24 * 30 });
         } catch (scanErr) {
           console.warn("incremental scan failed; serving cache without advancing scannedTo:", scanErr.message || scanErr);
@@ -48,7 +52,7 @@ export default async function handler(req, res) {
     result.scannedTo = scannedTo;
     result.latestBlock = latest;
     result.contract = CONTRACT;
-    result.cacheAgeMs = cached ? Date.now() - (cached.cachedAt || 0) : 0;
+    result.cacheAgeMs = cached?.cachedAt ? Date.now() - cached.cachedAt : 0;
 
     // Persist a cachedAt marker alongside without re-scanning (cheap metadata update)
     if (!cached || cached.scannedTo !== scannedTo) {

@@ -12,6 +12,16 @@ function fmtDuration(s) {
   const out = d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
   return (neg ? "-" : "") + out;
 }
+/** Race snipes: show milliseconds (chain timestamps are 1s resolution, Base ~2s/block). */
+function fmtSnipe(latencySec) {
+  if (latencySec == null) return "—";
+  const neg = latencySec < 0;
+  const sec = Math.abs(latencySec);
+  // Long delays stay human-readable; race window stays in ms.
+  if (sec >= 3600) return (neg ? "-" : "") + fmtDuration(sec);
+  const ms = Math.round(sec * 1000);
+  return (neg ? "-" : "") + ms.toLocaleString("en-US") + "ms";
+}
 function fmtClawd(weiStr) {
   const n = Number(BigInt(weiStr) / 10n ** 18n);
   return n.toLocaleString("en-US");
@@ -164,7 +174,7 @@ export default function Home() {
             <div className="tile">
               <div className="label">Median snipe</div>
               <div className="value">
-                {fmtDuration(data.events.filter(e => e.latency != null && e.gap <= PAUSE_THRESHOLD).map(e => e.latency).sort((a,b)=>a-b)[Math.floor(data.events.filter(e => e.latency != null && e.gap <= PAUSE_THRESHOLD).length / 2)])}
+                {fmtSnipe(data.events.filter(e => e.latency != null && e.gap <= PAUSE_THRESHOLD).map(e => e.latency).sort((a,b)=>a-b)[Math.floor(data.events.filter(e => e.latency != null && e.gap <= PAUSE_THRESHOLD).length / 2)])}
               </div>
               <div className="sub">past cooldown expiry, cold spells excluded</div>
             </div>
@@ -223,7 +233,7 @@ export default function Home() {
                       <td className="num">
                         {e.latency == null ? "—"
                           : e.gap > PAUSE_THRESHOLD ? <span className="pause-flag">after cold spell</span>
-                          : <span className={e.latency <= 60 ? "snipe" : "slow"}>{fmtDuration(e.latency)}</span>}
+                          : <span className={e.latency <= 60 ? "snipe" : "slow"}>{fmtSnipe(e.latency)}</span>}
                       </td>
                       <td className="num"><a href={`https://basescan.org/tx/${e.tx}`} target="_blank" rel="noopener noreferrer">tx →</a></td>
                     </tr>

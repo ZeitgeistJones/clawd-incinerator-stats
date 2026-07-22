@@ -12,6 +12,19 @@ function fmtDuration(s) {
   const out = d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
   return (neg ? "-" : "") + out;
 }
+/** Prefer live wall-clock ms when watcher caught it; else chain-second duration. */
+function fmtSnipe(e) {
+  if (e?.liveLatencyMs != null && Number.isFinite(e.liveLatencyMs)) {
+    const neg = e.liveLatencyMs < 0;
+    const sec = Math.abs(e.liveLatencyMs) / 1000;
+    if (sec >= 3600) return (neg ? "-" : "") + fmtDuration(sec);
+    const out = sec >= 60
+      ? `${Math.floor(sec / 60)}m ${(sec % 60).toFixed(1)}s`
+      : `${sec.toFixed(1)}s`;
+    return (neg ? "-" : "") + out;
+  }
+  return fmtDuration(e?.latency);
+}
 function fmtClawd(weiStr) {
   const n = Number(BigInt(weiStr) / 10n ** 18n);
   return n.toLocaleString("en-US");
@@ -85,8 +98,11 @@ export default function Home() {
         .cachebadge{ font-size:11px;color:var(--cold);letter-spacing:.08em;text-transform:uppercase; }
         #strip-wrap{padding:36px 0 8px}
         .strip-axis{ display:flex;justify-content:space-between;font-size:11px;color:var(--cold); letter-spacing:.08em;text-transform:uppercase;padding-top:8px; }
-        .tiles{ display:grid;grid-template-columns:repeat(4,1fr);gap:1px; background:var(--soot-edge);border:1px solid var(--soot-edge);margin-top:28px; }
+        .tiles{ display:grid;grid-template-columns:repeat(5,1fr);gap:1px; background:var(--soot-edge);border:1px solid var(--soot-edge);margin-top:28px; }
+        @media (max-width:980px){ .tiles{grid-template-columns:repeat(3,1fr)} }
         @media (max-width:760px){ .tiles{grid-template-columns:repeat(2,1fr)} }
+        .streak-tiles{ display:grid;grid-template-columns:repeat(2,1fr);gap:1px; background:var(--soot-edge);border:1px solid var(--soot-edge);margin-top:16px; }
+        @media (max-width:760px){ .streak-tiles{grid-template-columns:1fr} }
         .tile{background:var(--soot);padding:22px 20px 18px}
         .tile .label{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--cold);margin-bottom:12px}
         .tile .value{ font-family:'Anton',sans-serif;font-size:clamp(30px,4.5vw,52px); line-height:1;color:var(--ash); }
@@ -168,7 +184,49 @@ export default function Home() {
               </div>
               <div className="sub">past cooldown expiry, cold spells excluded</div>
             </div>
+            <div className="tile">
+              <div className="label">Current streak</div>
+              <div className="value hot">{data.streaks?.current?.count || 0}</div>
+              <div className="sub">
+                {data.streaks?.current?.addr
+                  ? <>{shortAddr(data.streaks.current.addr)} · since {fmtDay(data.streaks.current.from)}</>
+                  : "no burns yet"}
+              </div>
+            </div>
           </div>
+
+          <section>
+            <h2>Streaks</h2>
+            <div className="section-note">Same wallet burning in a row. Broken by another wallet or a cold spell.</div>
+            <div className="streak-tiles">
+              <div className="tile">
+                <div className="label">Current</div>
+                <div className="value hot">{data.streaks?.current?.count || 0}</div>
+                <div className="sub">
+                  {data.streaks?.current?.addr ? (
+                    <>
+                      <a href={`https://basescan.org/address/${data.streaks.current.addr}`} target="_blank" rel="noopener noreferrer">{shortAddr(data.streaks.current.addr)}</a>
+                      {" · "}{data.streaks.current.count === 1 ? "1 burn" : `${data.streaks.current.count} burns`}
+                      {" · "}{fmtDay(data.streaks.current.from)} → {fmtDay(data.streaks.current.to)}
+                    </>
+                  ) : "—"}
+                </div>
+              </div>
+              <div className="tile">
+                <div className="label">Longest ever</div>
+                <div className="value">{data.streaks?.longest?.count || 0}</div>
+                <div className="sub">
+                  {data.streaks?.longest?.addr ? (
+                    <>
+                      <a href={`https://basescan.org/address/${data.streaks.longest.addr}`} target="_blank" rel="noopener noreferrer">{shortAddr(data.streaks.longest.addr)}</a>
+                      {" · "}{data.streaks.longest.count === 1 ? "1 burn" : `${data.streaks.longest.count} burns`}
+                      {" · "}{fmtDay(data.streaks.longest.from)} → {fmtDay(data.streaks.longest.to)}
+                    </>
+                  ) : "—"}
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section>
             <h2>Cold spells</h2>
@@ -223,7 +281,7 @@ export default function Home() {
                       <td className="num">
                         {e.latency == null ? "—"
                           : e.gap > PAUSE_THRESHOLD ? <span className="pause-flag">after cold spell</span>
-                          : <span className={e.latency <= 60 ? "snipe" : "slow"}>{fmtDuration(e.latency)}</span>}
+                          : <span className={(e.liveLatencyMs != null ? e.liveLatencyMs / 1000 : e.latency) <= 60 ? "snipe" : "slow"}>{fmtSnipe(e)}</span>}
                       </td>
                       <td className="num"><a href={`https://basescan.org/tx/${e.tx}`} target="_blank" rel="noopener noreferrer">tx →</a></td>
                     </tr>

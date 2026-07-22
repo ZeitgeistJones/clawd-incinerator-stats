@@ -12,6 +12,7 @@ import { CONTRACT, DEPLOY_BLOCK, rpc, scanRange, analyze } from "../../lib/incin
 
 const redis = Redis.fromEnv();
 const CACHE_KEY = "incinerator:events:v1";
+const LIVE_KEY = "incinerator:live-latency:v1";
 const LOCK_KEY = "incinerator:scanlock:v1";
 const LOCK_TTL_SECONDS = 90; // tip catch-up can exceed 30s on public RPCs
 // Cap work per request so serverless doesn't time out while still making progress.
@@ -53,6 +54,14 @@ export default async function handler(req, res) {
     result.latestBlock = latest;
     result.contract = CONTRACT;
     result.cacheAgeMs = cached?.cachedAt ? Date.now() - cached.cachedAt : 0;
+
+    // Attach live wall-clock latency only when the watcher caught that tx.
+    // Missing entries stay undefined → UI falls back to chain-second timing.
+    const live = (await redis.get(LIVE_KEY)) || {};
+    for (const e of result.events) {
+      const hit = live[String(e.tx).toLowerCase()];
+      if (hit && typeof hit.latencyMs === "number") e.liveLatencyMs = hit.latencyMs;
+    }
 
     // Persist a cachedAt marker alongside without re-scanning (cheap metadata update)
     if (!cached || cached.scannedTo !== scannedTo) {

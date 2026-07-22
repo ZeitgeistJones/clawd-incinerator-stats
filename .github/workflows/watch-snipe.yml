@@ -1,0 +1,31 @@
+# Free live-snipe watcher. Runs often; exits in seconds unless unlock is near.
+# Only writes liveLatencyMs when it sees a NEW burn appear mid-watch.
+#
+# Repo secrets required:
+#   UPSTASH_REDIS_REST_URL
+#   UPSTASH_REDIS_REST_TOKEN
+# Optional:
+#   RPC_URL  (HTTP Base RPC; public endpoints used as fallback)
+
+name: Watch snipe
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Watch unlock window
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          RPC_URL: ${{ secrets.RPC_URL }}
+        run: node scripts/watch-snipe.mjs

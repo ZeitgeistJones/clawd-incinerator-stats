@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Free GitHub Actions watcher: near cooldown unlock, poll for the next burn and
-// record wall-clock latency (ms). Only writes when we see a NEW tx appear after
-// watch start — never invents numbers for burns we already missed.
+// Free GitHub Actions watcher: near cooldown unlock, wait for readyAt then poll
+// for the next burn and record wall-clock latency (ms). Only writes when we see
+// a NEW tx appear after polling starts — never invents numbers for missed burns.
 //
 // Secrets: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
 // Optional: RPC_URL (HTTP). Public Base RPCs used as fallback.
@@ -12,10 +12,11 @@ const COOLDOWN = 28800;
 const CACHE_KEY = "incinerator:events:v1";
 const LIVE_KEY = "incinerator:live-latency:v1";
 
-const PRE_MIN = 5;       // start watching this many minutes before unlock
-const POST_MIN = 25;     // stop this many minutes after unlock
-const MAX_WATCH_MS = 12 * 60 * 1000;
-const POLL_MS = 750;
+// Wake early enough that a late GitHub cron can still wait for unlock.
+const PRE_MIN = 22;      // enter window this many minutes before unlock
+const POST_MIN = 20;     // give up this many minutes after unlock
+const MAX_WATCH_MS = 18 * 60 * 1000; // hard cap after unlock (Actions minutes)
+const POLL_MS = 500;
 
 const PUBLIC_RPCS = [
   process.env.RPC_URL,
@@ -110,6 +111,21 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function sleepUntil(targetMs, label) {
+  const ms = targetMs - Date.now();
+  if (ms <= 0) return;
+  console.log(`${label}: sleeping ${Math.round(ms / 1000)}s until ${new Date(targetMs).toISOString()}`);
+  // Chunk sleep so logs show we're alive and we don't oversleep weirdly.
+  const chunk = 30_000;
+  let left = ms;
+  while (left > 0) {
+    const step = Math.min(chunk, left);
+    await sleep(step);
+    left -= step;
+    if (left > 0) console.log(`… ${Math.round(left / 1000)}s left`);
+  }
+}
+
 async function main() {
   const cached = await redisGetJson(CACHE_KEY);
   const events = cached?.events || [];
@@ -120,6 +136,7 @@ async function main() {
 
   const last = [...events].sort((a, b) => a.timestamp - b.timestamp || a.block - b.block).at(-1);
   const readyAt = last.timestamp + COOLDOWN;
+  const readyAtMs = readyAt * 1000;
   const now = Date.now() / 1000;
   const windowStart = readyAt - PRE_MIN * 60;
   const windowEnd = readyAt + POST_MIN * 60;
@@ -128,6 +145,7 @@ async function main() {
     lastTx: last.tx,
     lastTs: last.timestamp,
     readyAt,
+    readyAtIso: new Date(readyAtMs).toISOString(),
     now: Math.floor(now),
     inWindow: now >= windowStart && now <= windowEnd,
   }));
@@ -135,6 +153,11 @@ async function main() {
   if (now < windowStart || now > windowEnd) {
     console.log("outside watch window — exit");
     return;
+  }
+
+  // Arrive early → wait for unlock, then poll. That's how we catch snappy snipes.
+  if (Date.now() < readyAtMs) {
+    await sleepUntil(readyAtMs, "pre-unlock");
   }
 
   const live = (await redisGetJson(LIVE_KEY)) || {};
@@ -153,7 +176,6 @@ async function main() {
     return;
   }
 
-  const readyAtMs = readyAt * 1000;
   const deadline = Math.min(Date.now() + MAX_WATCH_MS, windowEnd * 1000);
   console.log(`watching until ${new Date(deadline).toISOString()} (poll ${POLL_MS}ms)`);
 

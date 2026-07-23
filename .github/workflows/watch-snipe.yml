@@ -1,4 +1,5 @@
 # Free live-snipe watcher. Runs often; exits in seconds unless unlock is near.
+# If unlock is soon, waits for readyAt then polls so snappy snipes can be timed.
 # Only writes liveLatencyMs when it sees a NEW burn appear mid-watch.
 #
 # Repo secrets required:
@@ -17,7 +18,7 @@ on:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
